@@ -1,0 +1,77 @@
+# Initialization
+units metal
+dimension 3
+boundary p p f
+newton on
+atom_style full
+neighbor 2.0 nsq
+neigh_modify delay 0 every 2  check yes one 4000
+
+# Creat geometry 
+read_data    Gr10x3_4L2_CNT5@5x2_PBD.data
+
+# Potential
+pair_style 	airebo 4.8 1 0 4.5
+pair_coeff   * *  CH.airebo C C 
+
+#region rgn_graDown block INF INF INF INF INF 5 units box
+group  grp_graDown molecule 1
+
+#region rgn_graUp block INF INF INF INF 40 INF units box
+group  grp_graUp molecule 2
+
+#region rgn_ND block INF INF INF INF 5 40 units box
+#group  grp_ND region rgn_ND
+group  grp_ND molecule 3:4
+
+#------------------ minimization -----------------------
+dump  min all custom 100 dump_min.dump  id mol type x y z
+
+fix min_1 all planeforce 0.0 0.0 1.0
+
+thermo  100
+thermo_style custom step lx ly lz pe etotal
+
+min_style cg
+minimize 1.0e-8 1.0e-8 100000 1000000
+
+undump min
+unfix min_1
+# -------------------- relax ---------------------------
+reset_timestep 0
+timestep 0.001
+
+variable  Tv  equal  300.0 #0.00001
+variable  addFz  equal  -0.0 #0.00001
+
+velocity all create ${Tv} 8739753 mom yes rot yes
+
+compute pePerAtom all pe/atom
+compute peGrUp grp_graUp reduce sum c_pePerAtom
+compute peND grp_ND reduce sum c_pePerAtom
+compute centND grp_ND com
+
+#fix rlx_0 grp_gra_ND nvt temp ${Tv} ${Tv} 0.05
+fix rlx_0 all nve
+fix rlx_1 all langevin  ${Tv}  ${Tv}  0.1  668433
+
+fix rlx_3 grp_graDown wall/lj93 zlo -4.89 0.07013  4.89  15.0
+fix rlx_4 grp_graDown momentum 500 linear 1 1 0 angular rescale
+
+fix rlx_5 grp_graUp addforce 0.0 0.0 ${addFz} every 1
+
+group  grp_ND_1 molecule 3
+group  grp_ND_2 molecule 4
+fix rlx_6_1 grp_ND_1 momentum 10 linear 1 1 0 rescale
+fix rlx_6_2 grp_ND_2 momentum 10 linear 1 1 0 rescale
+
+dump  relax all custom 1000 dump/relax*.dump  id mol type x y z c_pePerAtom fz
+
+thermo  1000
+thermo_style custom step lx ly lz pe etotal temp c_peGrUp c_peND c_centND[3]  
+
+balance 1.1 shift xyz 100 1.1
+
+run 600000
+
+
